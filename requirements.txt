@@ -5,6 +5,7 @@ Pillow
 matplotlib
 pandas
 scikit-learn
+scikit-image
 datetime
 seaborn
 torch
