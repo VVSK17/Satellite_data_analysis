@@ -1,9 +1,10 @@
 streamlit
-tensorflow
-scikit-learn
-joblib
-pillow
-matplotlib
-opencv-python-headless
 numpy
+opencv-python-headless
+torch
+torchvision
+Pillow
+matplotlib
 pandas
+scikit-learn
+datetime
