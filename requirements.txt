@@ -8,3 +8,7 @@ matplotlib
 pandas
 scikit-learn
 datetime
+pip install <new_or_updated_package>
+pip freeze > requirements.txt
+git add requirements.txt
+git commit -m "Update requirements with <package_name>"
