@@ -310,8 +310,7 @@ def page2():
                     st.session_state.heatmap_overlay_svm = Image.blend(aligned_after_resized.convert("RGB"),
                                                                         heatmap_img_svm.convert("RGB"),
                                                                         alpha=0.5)
-                    st.session_state.classification = st.session_state.
-                    classification_svm
+                    st.session_state.classification = st.session_state.classification_svm
                     st.session_state.svm_roc_fig = generate_roc_curve_svm()
                     st.session_state.svm_accuracy = calculate_accuracy_svm()
                     # Dummy data for confusion matrix and classification report
