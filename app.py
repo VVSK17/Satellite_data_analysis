@@ -1,4 +1,4 @@
-!pip install streamlit numpy opencv-python Pillow matplotlib pandas scikit-learn seaborn
+pip install streamlit numpy opencv-python Pillow matplotlib pandas scikit-learn seaborn
 import streamlit as st
 import numpy as np
 import cv2
