@@ -10,7 +10,6 @@ from sklearn.metrics import roc_curve, auc, accuracy_score, confusion_matrix, cl
 from datetime import datetime
 import seaborn as sns
 from skimage.transform import resize
-from skimage.registration import register_translation
 from scipy.fft import fft2, ifft2
 
 # Initialize session state
