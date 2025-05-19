@@ -8,19 +8,24 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import io
 from sklearn import svm
+from torchvision import transforms
 from datetime import datetime
 
 # Initialize session state for page navigation and data storage
 if 'page' not in st.session_state:
     st.session_state.page = 1
-if 'heatmap_overlay' not in st.session_state:
-    st.session_state.heatmap_overlay = None
+if 'heatmap_overlay_svm' not in st.session_state:
+    st.session_state.heatmap_overlay_svm = None
+if 'heatmap_overlay_cnn' not in st.session_state:
+    st.session_state.heatmap_overlay_cnn = None
 if 'aligned_images' not in st.session_state:
     st.session_state.aligned_images = None
 if 'change_mask' not in st.session_state:
     st.session_state.change_mask = None
-if 'classification' not in st.session_state:
-    st.session_state.classification = None
+if 'classification_svm' not in st.session_state:
+    st.session_state.classification_svm = None
+if 'classification_cnn' not in st.session_state:
+    st.session_state.classification_cnn = None
 if 'before_date' not in st.session_state:
     st.session_state.before_date = datetime(2023, 1, 1)
 if 'after_date' not in st.session_state:
@@ -110,9 +115,18 @@ def get_change_mask(img1, img2, threshold=30):
     _, change_mask = cv2.threshold(diff, threshold, 1, cv2.THRESH_BINARY)
     return change_mask.astype(np.uint8)
 
-def classify_land(img):
-    """Simplified land classification"""
-    return {"Vegetation": 45, "Land": 35, "Water": 20}
+def classify_land_svm(img):
+    """Simplified land classification using SVM (Placeholder)"""
+    # In a real scenario, you would load a trained SVM model here and use it for prediction.
+    # For this example, we'll return a dummy classification.
+    return {"Vegetation": 40, "Land": 30, "Water": 30}
+
+def classify_land_cnn(img):
+    """Simplified land classification using CNN (Placeholder)"""
+    # In a real scenario, you would load a trained CNN model here, preprocess the image,
+    # pass it through the model, and interpret the output.
+    # For this example, we'll return a different dummy classification.
+    return {"Vegetation": 45, "Land": 35, "Developed": 20}
 
 def detect_calamity(date1, date2, change_percentage):
     """Detects potential calamities based on changes and time difference"""
@@ -120,14 +134,14 @@ def detect_calamity(date1, date2, change_percentage):
 
     if change_percentage > 0.15:
         if date_diff <= 10:
-            return "⚠️ Possible Flood (Rapid Change)"
+            return "⚠️ **Possible Flood:** Rapid and significant changes observed in a short period may indicate flooding."
         elif date_diff <= 30:
-            return "🔥 Possible Deforestation (Significant Change Over Short Term)"
+            return "🔥 **Possible Deforestation:** Significant loss of vegetation over a short term could suggest deforestation or wildfires."
         else:
-            return "🏗️ Possible Urbanization (Gradual, Significant Change)"
+            return "🏗️ **Possible Urbanization:** Gradual yet significant increase in developed areas over time might indicate urbanization."
     elif change_percentage > 0.05:
-        return "🌱 Seasonal Changes Detected"
-    return "✅ No Significant Calamity Detected"
+        return "🌱 **Seasonal Changes Detected:** Minor changes likely due to natural seasonal variations in vegetation or water bodies."
+    return "✅ **No Significant Calamity Detected:** Minimal changes observed between the two images."
 
 def get_csv_bytes(data_dict):
     df = pd.DataFrame(list(data_dict.items()), columns=["Class", "Area (%)"])
@@ -181,8 +195,32 @@ def page2():
                 # Calculate change mask
                 st.session_state.change_mask = get_change_mask(before_img, aligned_after)
 
-                # Classify land
-                st.session_state.classification = classify_land(aligned_after)
+                # Classify land based on selected model
+                if st.session_state.model_choice == "SVM":
+                    st.session_state.classification_svm = classify_land_svm(aligned_after)
+                    # Create SVM heatmap
+                    h, w = st.session_state.change_mask.shape
+                    heatmap_svm = np.zeros((h, w, 3), dtype=np.uint8)
+                    heatmap_svm[..., 0] = st.session_state.change_mask * 255  # Blue channel for SVM
+                    heatmap_img_svm = Image.fromarray(heatmap_svm)
+                    aligned_after_resized = st.session_state.aligned_images["after"].resize((w, h))
+                    st.session_state.heatmap_overlay_svm = Image.blend(aligned_after_resized.convert("RGB"),
+                                                                        heatmap_img_svm.convert("RGB"),
+                                                                        alpha=0.5)
+                    st.session_state.classification = st.session_state.classification_svm # For common analysis
+
+                elif st.session_state.model_choice == "CNN":
+                    st.session_state.classification_cnn = classify_land_cnn(aligned_after)
+                    # Create CNN heatmap
+                    h, w = st.session_state.change_mask.shape
+                    heatmap_cnn = np.zeros((h, w, 3), dtype=np.uint8)
+                    heatmap_cnn[..., 1] = st.session_state.change_mask * 255  # Green channel for CNN
+                    heatmap_img_cnn = Image.fromarray(heatmap_cnn)
+                    aligned_after_resized = st.session_state.aligned_images["after"].resize((w, h))
+                    st.session_state.heatmap_overlay_cnn = Image.blend(aligned_after_resized.convert("RGB"),
+                                                                        heatmap_img_cnn.convert("RGB"),
+                                                                        alpha=0.5)
+                    st.session_state.classification = st.session_state.classification_cnn # For common analysis
 
                 st.session_state.page = 3
             except Exception as e:
@@ -221,22 +259,24 @@ def page4():
         st.session_state.page = 2
         return
 
-    # Get dimensions from change mask
+    st.subheader(f"Heatmap using {st.session_state.model_choice} Model")
+
     h, w = st.session_state.change_mask.shape
+    aligned_after_resized = st.session_state.aligned_images["after"].resize((w, h))
 
-    # Create heatmap visualization
-    heatmap = np.zeros((h, w, 3), dtype=np.uint8)
-    heatmap[..., 2] = st.session_state.change_mask * 255  # Red channel
-
-    # Convert to PIL images
-    heatmap_img = Image.fromarray(heatmap)
-    aligned_after = st.session_state.aligned_images["after"].resize((w, h))
-
-    # Create overlay and store in session
-    st.session_state.heatmap_overlay = Image.blend(aligned_after.convert("RGB"),
-                                                    heatmap_img.convert("RGB"),
-                                                    alpha=0.5)
-    st.image(st.session_state.heatmap_overlay, use_column_width=True)
+    if st.session_state.model_choice == "SVM" and st.session_state.heatmap_overlay_svm:
+        st.image(st.session_state.heatmap_overlay_svm, caption="Change Heatmap (Blue)", use_column_width=True)
+    elif st.session_state.model_choice == "CNN" and st.session_state.heatmap_overlay_cnn:
+        st.image(st.session_state.heatmap_overlay_cnn, caption="Change Heatmap (Green)", use_column_width=True)
+    else:
+        # Default red heatmap if something goes wrong or initially
+        heatmap = np.zeros((h, w, 3), dtype=np.uint8)
+        heatmap[..., 2] = st.session_state.change_mask * 255  # Red channel
+        heatmap_img = Image.fromarray(heatmap)
+        st.session_state.heatmap_overlay_default = Image.blend(aligned_after_resized.convert("RGB"),
+                                                                heatmap_img.convert("RGB"),
+                                                                alpha=0.5)
+        st.image(st.session_state.heatmap_overlay_default, caption="Change Heatmap (Default Red)", use_column_width=True)
 
     if st.button("⬅️ Back"):
         st.session_state.page = 3
@@ -256,80 +296,31 @@ def page5():
     total_change = (np.sum(st.session_state.change_mask) / total_pixels)
 
     # Calamity detection
-    calamity = detect_calamity(
+    st.subheader("🚨 Calamity Detection")
+    calamity_report = detect_calamity(
         st.session_state.before_date,
         st.session_state.after_date,
         total_change
     )
-
-    # Display calamity alert with enhanced styling and description
-    st.markdown(
-        """
-        <h2 style='font-size: 36px; color: white;'>
-            🚨 Calamity Detection
-        </h2>
-        <p style='font-size: 18px; color: lightgray;'>
-            Based on the analysis of the uploaded satellite images and change metrics, the system has identified the most likely natural calamity in the region.
+    st.markdown(f"<h3 style='color: orange;'>{calamity_report}</h3>", unsafe_allow_html=True)
+    st.markdown("""
+        <p style='font-size: 16px; color: lightgray;'>
+            This section analyzes the changes detected between the 'before' and 'after' images, 
+            considering the magnitude of change and the time elapsed. The system identifies 
+            potential natural or human-induced calamities based on these factors.
         </p>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.markdown(f"<h3 style='color: orange;'>{calamity}</h3>", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
 
     # Classification Table
-    st.subheader("Land Classification")
+    st.subheader(f"Land Classification using {st.session_state.model_choice}")
     df_class = pd.DataFrame(list(st.session_state.classification.items()),
                             columns=["Class", "Area (%)"])
     st.table(df_class)
 
     # Pie Chart
-    st.subheader("Land Distribution")
-    fig, ax = plt.subplots()
-    colors = ['#4CAF50', '#FFEB3B', '#2196F3']  # Removed urban color
-    ax.pie(df_class["Area (%)"],
-           labels=df_class["Class"],
-           autopct='%1.1f%%',
-           colors=colors)
-    ax.axis('equal')
-    st.pyplot(fig)
+    st.subheader("Land Distribution Comparison")
+    fig, ax = plt.subplots(1, 2, figsize=(12, 6))
 
-    # Changed area display
-    st.subheader(f"Total Changed Area: {total_change*100:.2f}%")
-
-    # Download Section
-    st.header("Download Reports")
-    csv_bytes = get_csv_bytes(st.session_state.classification)
-    st.download_button("Download Classification CSV", data=csv_bytes,
-                        file_name="classification_summary.csv", mime="text/csv")
-
-    if 'heatmap_overlay' in st.session_state and st.session_state.heatmap_overlay:
-        buf = io.BytesIO()
-        st.session_state.heatmap_overlay.save(buf, format='PNG')
-        st.download_button("Download Annotated Image", data=buf.getvalue(),
-                            file_name="annotated_after.png", mime="image/png")
-
-    if st.button("⬅️ Back"):
-        st.session_state.page = 4
-
-# -------- Main App --------
-def main():
-    st.title("Satellite Image Analysis with Alignment & Land Classification")
-
-    pages = {
-        1: page1,
-        2: page2,
-        3: page3,
-        4: page4,
-        5: page5
-    }
-
-    if st.session_state.page in pages:
-        pages[st.session_state.page]()
-    else:
-        st.session_state.page = 1
-        pages[1]()
-
-if __name__ == "__main__":
-    main()
+    # Dummy data for before image classification (replace with actual if available)
+    classification_before
