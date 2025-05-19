@@ -105,16 +105,10 @@ def align_images(img1, img2):
         aligned = cv2.warpAffine(img2_np, warp_matrix,
                                  (img1_np.shape[1], img1_np.shape[0]),
                                  flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
-
-        diff_mask = cv2.absdiff(img1_np, aligned)
-        diff_mask = cv2.cvtColor(diff_mask, cv2.COLOR_RGB2GRAY)
-        _, black_mask = cv2.threshold(diff_mask, 30, 255, cv2.THRESH_BINARY_INV)
-        aligned_black = cv2.bitwise_and(aligned, aligned, mask=black_mask)
-
-        return Image.fromarray(aligned), Image.fromarray(aligned_black)
+        return Image.fromarray(aligned)
     except Exception as e:
         st.error(f"Image alignment failed: {e}")
-        return img2, img2
+        return img2
 
 def get_change_mask(img1, img2, threshold=30):
     # Ensure images are the same size
@@ -123,7 +117,7 @@ def get_change_mask(img1, img2, threshold=30):
     gray1 = cv2.cvtColor(np.array(img1), cv2.COLOR_RGB2GRAY)
     gray2 = cv2.cvtColor(np.array(img2), cv2.COLOR_RGB2GRAY)
     diff = cv2.absdiff(gray1, gray2)
-    _, change_mask = cv2.threshold(diff, threshold, 1, cv2.THRESH_BINARY)
+    _, change_mask = cv2.threshold(diff, threshold, 255, cv2.THRESH_BINARY)
     return change_mask.astype(np.uint8)
 
 def classify_land_svm(img):
@@ -157,6 +151,14 @@ def detect_calamity(date1, date2, change_percentage):
 def get_csv_bytes(data_dict):
     df = pd.DataFrame(list(data_dict.items()), columns=["Class", "Area (%)"])
     return df.to_csv(index=False).encode()
+
+def create_colored_change_map(aligned_img, change_mask, color=(255, 0, 0)):
+    """Overlays the aligned image with a colored mask where changes occurred."""
+    aligned_np = np.array(aligned_img).astype(np.uint8)
+    colored_mask = np.zeros_like(aligned_np, dtype=np.uint8)
+    colored_mask[change_mask == 255] = color
+    overlay = cv2.addWeighted(aligned_np, 0.7, colored_mask, 0.3, 0)
+    return Image.fromarray(overlay)
 
 # -------- Pages --------
 def page1():
@@ -196,11 +198,10 @@ def page2():
                 after_img = Image.open(st.session_state.after_file).convert("RGB")
 
                 # Align images using ECC method
-                aligned_after, aligned_black = align_images(before_img, after_img)
+                aligned_after = align_images(before_img, after_img)
                 st.session_state.aligned_images = {
                     "before": before_img,
-                    "after": aligned_after,
-                    "aligned_black": aligned_black
+                    "after": aligned_after
                 }
 
                 # Calculate change mask
@@ -209,30 +210,12 @@ def page2():
                 # Classify land based on selected model
                 if st.session_state.model_choice == "SVM":
                     st.session_state.classification_svm = classify_land_svm(aligned_after)
-                    # Create SVM heatmap (Orange)
-                    h, w = st.session_state.change_mask.shape
-                    heatmap_svm = np.zeros((h, w, 3), dtype=np.uint8)
-                    heatmap_svm[..., 1] = 165  # Green channel
-                    heatmap_svm[..., 2] = 255  # Red channel
-                    heatmap_img_svm = Image.fromarray(heatmap_svm)
-                    aligned_after_resized = st.session_state.aligned_images["after"].resize((w, h))
-                    st.session_state.heatmap_overlay_svm = Image.blend(aligned_after_resized.convert("RGB"),
-                                                                        heatmap_img_svm.convert("RGB"),
-                                                                        alpha=0.5)
+                    st.session_state.heatmap_overlay_svm = create_colored_change_map(aligned_after, st.session_state.change_mask, color=(255, 0, 0)) # Red for SVM
                     st.session_state.classification = st.session_state.classification_svm # For common analysis
 
                 elif st.session_state.model_choice == "CNN":
                     st.session_state.classification_cnn = classify_land_cnn(aligned_after)
-                    # Create CNN heatmap (Purple)
-                    h, w = st.session_state.change_mask.shape
-                    heatmap_cnn = np.zeros((h, w, 3), dtype=np.uint8)
-                    heatmap_cnn[..., 0] = 128  # Blue channel
-                    heatmap_cnn[..., 2] = 128  # Red channel
-                    heatmap_img_cnn = Image.fromarray(heatmap_cnn)
-                    aligned_after_resized = st.session_state.aligned_images["after"].resize((w, h))
-                    st.session_state.heatmap_overlay_cnn = Image.blend(aligned_after_resized.convert("RGB"),
-                                                                        heatmap_img_cnn.convert("RGB"),
-                                                                        alpha=0.5)
+                    st.session_state.heatmap_overlay_cnn = create_colored_change_map(aligned_after, st.session_state.change_mask, color=(0, 0, 255)) # Blue for CNN
                     st.session_state.classification = st.session_state.classification_cnn # For common analysis
 
                 st.session_state.page = 3
@@ -247,16 +230,13 @@ def page3():
         st.session_state.page = 2
         return
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         st.image(st.session_state.aligned_images["before"],
                  caption="BEFORE Image", use_column_width=True)
     with col2:
         st.image(st.session_state.aligned_images["after"],
                  caption="Aligned AFTER Image", use_column_width=True)
-    with col3:
-        st.image(st.session_state.aligned_images["aligned_black"],
-                 caption="Aligned Difference", use_column_width=True)
 
     if st.button("⬅️ Back"):
         st.session_state.page = 2
@@ -264,7 +244,7 @@ def page3():
         st.session_state.page = 4
 
 def page4():
-    st.header("4. Change Detection Heatmap")
+    st.header("4. Change Detection Map")
 
     # Ensure we have valid images and change mask
     if 'aligned_images' not in st.session_state or st.session_state.aligned_images is None or st.session_state.change_mask is None:
@@ -272,24 +252,14 @@ def page4():
         st.session_state.page = 2
         return
 
-    st.subheader(f"Heatmap using {st.session_state.model_choice} Model")
-
-    h, w = st.session_state.change_mask.shape
-    aligned_after_resized = st.session_state.aligned_images["after"].resize((w, h))
+    st.subheader(f"Changed Area Map using {st.session_state.model_choice}")
 
     if st.session_state.model_choice == "SVM" and st.session_state.heatmap_overlay_svm:
-        st.image(st.session_state.heatmap_overlay_svm, caption="Change Heatmap (Orange)", use_column_width=True)
+        st.image(st.session_state.heatmap_overlay_svm, caption="Changed Area (Red)", use_column_width=True)
     elif st.session_state.model_choice == "CNN" and st.session_state.heatmap_overlay_cnn:
-        st.image(st.session_state.heatmap_overlay_cnn, caption="Change Heatmap (Purple)", use_column_width=True)
+        st.image(st.session_state.heatmap_overlay_cnn, caption="Changed Area (Blue)", use_column_width=True)
     else:
-        # Default red heatmap if something goes wrong or initially
-        heatmap = np.zeros((h, w, 3), dtype=np.uint8)
-        heatmap[..., 2] = st.session_state.change_mask * 255  # Red channel
-        heatmap_img = Image.fromarray(heatmap)
-        st.session_state.heatmap_overlay_default = Image.blend(aligned_after_resized.convert("RGB"),
-                                                                heatmap_img.convert("RGB"),
-                                                                alpha=0.5)
-        st.image(st.session_state.heatmap_overlay_default, caption="Change Heatmap (Default Red)", use_column_width=True)
+        st.warning("Change detection map not available.")
 
     if st.button("⬅️ Back"):
         st.session_state.page = 3
