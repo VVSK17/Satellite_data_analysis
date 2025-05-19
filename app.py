@@ -8,8 +8,8 @@ from sklearn import svm
 from sklearn.metrics import roc_curve, auc, accuracy_score, confusion_matrix, classification_report
 from datetime import datetime
 import seaborn as sns
-from skimage.transform import resize as sk_resize
-from skimage.feature import register_translation
+from skimage.transform import resize
+from skimage.registration import register_translation
 from scipy.fft import fft2, ifft2
 
 # Initialize session state
@@ -304,13 +304,13 @@ def page4():
     st.subheader(f"Heatmap using {st.session_state.model_choice} Model")
 
     h, w = st.session_state.change_mask.shape
-    aligned_after_resized = st.session_state.aligned_images["after"].resize((w, h))
+    aligned_after_resized = st.session_state.aligned_images["after"].resize(w, h))
 
     if st.session_state.model_choice == "SVM" and st.session_state.heatmap_overlay_svm is not None:
         st.image(st.session_state.heatmap_overlay_svm, caption="Change Heatmap (Blue)", use_column_width=True)
     else:
         # Default red heatmap if something goes wrong or initially
-        heatmap = np.zeros((h, w, 3),dtype=np.uint8)
+        heatmap = np.zeros((h, w, 3), dtype=np.uint8)
         heatmap[..., 2] = st.session_state.change_mask * 255  # Red channel
         heatmap_img = Image.fromarray(heatmap)
         st.session_state.heatmap_overlay_default = Image.blend(aligned_after_resized.convert("RGB"),
