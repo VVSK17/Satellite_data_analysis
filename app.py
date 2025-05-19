@@ -2,7 +2,6 @@ import streamlit as st
 import numpy as np
 import cv2
 import skimage.registration
-register_translation = skimage.registration.register_translation
 from PIL import Image
 import matplotlib.pyplot as plt
 import pandas as pd
