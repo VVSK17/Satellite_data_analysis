@@ -1,32 +1,28 @@
 import streamlit as st
 import numpy as np
 import cv2
-import torch
-import torch.nn as nn
 from PIL import Image
 import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn import svm
 from sklearn.metrics import roc_curve, auc, accuracy_score, confusion_matrix, classification_report
-from torchvision import transforms
 from datetime import datetime
 import seaborn as sns
+from skimage.transform import resize as sk_resize
+from skimage.feature import register_translation
+from scipy.fft import fft2, ifft2
 
 # Initialize session state
 if 'page' not in st.session_state:
     st.session_state.page = 1
 if 'heatmap_overlay_svm' not in st.session_state:
     st.session_state.heatmap_overlay_svm = None
-if 'heatmap_overlay_cnn' not in st.session_state:
-    st.session_state.heatmap_overlay_cnn = None
 if 'aligned_images' not in st.session_state:
     st.session_state.aligned_images = None
 if 'change_mask' not in st.session_state:
     st.session_state.change_mask = None
 if 'classification_svm' not in st.session_state:
     st.session_state.classification_svm = None
-if 'classification_cnn' not in st.session_state:
-    st.session_state.classification_cnn = None
 if 'before_date' not in st.session_state:
     st.session_state.before_date = datetime(2023, 1, 1)
 if 'after_date' not in st.session_state:
@@ -39,24 +35,14 @@ if 'model_choice' not in st.session_state:
     st.session_state.model_choice = "SVM"
 if 'svm_roc_fig' not in st.session_state:
     st.session_state.svm_roc_fig = None
-if 'cnn_roc_fig' not in st.session_state:
-    st.session_state.cnn_roc_fig = None
 if 'svm_accuracy' not in st.session_state:
     st.session_state.svm_accuracy = None
-if 'cnn_accuracy' not in st.session_state:
-    st.session_state.cnn_accuracy = None
 if 'classification_before_svm' not in st.session_state:
     st.session_state.classification_before_svm = {"Vegetation": 50, "Barren": 30, "Water": 20}
-if 'classification_before_cnn' not in st.session_state:
-    st.session_state.classification_before_cnn = {"Vegetation": 55, "Barren": 25, "Water": 20}
 if 'svm_conf_matrix' not in st.session_state:
     st.session_state.svm_conf_matrix = None
-if 'cnn_conf_matrix' not in st.session_state:
-    st.session_state.cnn_conf_matrix = None
 if 'svm_class_report' not in st.session_state:
     st.session_state.svm_class_report = None
-if 'cnn_class_report' not in st.session_state:
-    st.session_state.cnn_class_report = None
 
 
 # Set page config
@@ -71,24 +57,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-# -------- Models --------
-class DummyCNN(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 6, 3)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.fc1 = nn.Linear(6 * 14 * 14, 3)
-
-    def forward(self, x):
-        x = self.pool(torch.relu(self.conv1(x)))
-        x = x.view(-1, 6 * 14 * 14)
-        x = self.fc1(x)
-        return x
-
-cnn_model = DummyCNN()
-cnn_model.eval()
-svm_model = svm.SVC(probability=True)
 
 # -------- Image Processing Functions --------
 def preprocess_img(img, size=(64, 64)):
@@ -106,16 +74,21 @@ def align_images(img1, img2):
         img2_np = np.array(img2)
         gray1 = cv2.cvtColor(img1_np, cv2.COLOR_RGB2GRAY)
         gray2 = cv2.cvtColor(img2_np, cv2.COLOR_RGB2GRAY)
-        warp_matrix = np.eye(2, 3, dtype=np.float32)
-        criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 5000, 1e-10)
-        cc, warp_matrix = cv2.findTransformECC(gray1, gray2, warp_matrix, cv2.MOTION_EUCLIDEAN, criteria)
-        aligned = cv2.warpAffine(img2_np, warp_matrix, (img1_np.shape[1], img1_np.shape[0]),
-                                 flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
-        diff_mask = cv2.absdiff(img1_np, aligned)
+
+        # Use phase correlation for subpixel alignment
+        shifted, error, diffphase = register_translation(gray1, gray2, upsample_factor=10)
+        translation = (-shifted[1], -shifted[0])  # OpenCV uses (x, y)
+
+        # Apply the translation
+        M = np.float32([[1, 0, translation[0]], [0, 1, translation[1]]])
+        aligned = cv2.warpAffine(img2_np, M, (img1_np.shape[1], img1_np.shape[0]), borderMode=cv2.BORDER_REFLECT_101)
+
+        diff_mask = cv2.absdiff(img1_np, aligned.astype(np.uint8))
         diff_mask = cv2.cvtColor(diff_mask, cv2.COLOR_RGB2GRAY)
         _, black_mask = cv2.threshold(diff_mask, 30, 255, cv2.THRESH_BINARY_INV)
-        aligned_black = cv2.bitwise_and(aligned, aligned, mask=black_mask)
-        return Image.fromarray(aligned), Image.fromarray(aligned_black)
+        aligned_black = cv2.bitwise_and(aligned.astype(np.uint8), aligned.astype(np.uint8), mask=black_mask)
+
+        return Image.fromarray(aligned.astype(np.uint8)), Image.fromarray(aligned_black)
     except Exception as e:
         st.error(f"Image alignment failed: {e}")
         return img2, img2
@@ -142,19 +115,6 @@ def classify_land_svm(img_arr):
         return {classes[i]: prob * 100 for i, prob in enumerate(probabilities)}
     except Exception as e:
         st.error(f"SVM classification error: {e}")
-        return {}
-
-def classify_land_cnn(img):
-    try:
-        transform = transforms.ToTensor()
-        img_tensor = transform(img).unsqueeze(0)
-        with torch.no_grad():
-            output = cnn_model(img_tensor)
-            probabilities = torch.softmax(output, dim=1).numpy()[0]
-            classes = ["Vegetation", "Barren", "Water"]
-            return {classes[i]: prob * 100 for i, prob in enumerate(probabilities)}
-    except Exception as e:
-        st.error(f"CNN classification error: {e}")
         return {}
 
 def detect_calamity(date1, date2, change_percentage):
@@ -201,29 +161,6 @@ def generate_roc_curve_svm():
         st.error(f"Error generating SVM ROC curve: {e}")
         return None
 
-def generate_roc_curve_cnn():
-    try:
-        # Dummy data for ROC curve (replace with actual predictions and true labels)
-        y_true = np.array([0, 1, 0, 1, 1, 0])
-        y_scores = np.array([0.8, 0.6, 0.3, 0.9, 0.7, 0.2])
-
-        fpr, tpr, thresholds = roc_curve(y_true, y_scores)
-        roc_auc = auc(fpr, tpr)
-
-        fig, ax = plt.subplots()
-        ax.plot(fpr, tpr, color='green', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
-        ax.plot([0, 1], [0, 1], color='gray', lw=1, linestyle='--')
-        ax.set_xlim([0.0, 1.0])
-        ax.set_ylim([0.0, 1.05])
-        ax.set_xlabel('False Positive Rate')
-        ax.set_ylabel('True Positive Rate')
-        ax.set_title('Receiver Operating Characteristic (CNN)')
-        ax.legend(loc="lower right")
-        return fig
-    except Exception as e:
-        st.error(f"Error generating CNN ROC curve: {e}")
-        return None
-
 def calculate_accuracy_svm():
     try:
         # Dummy data for accuracy calculation (replace with actual predictions and true labels)
@@ -232,16 +169,6 @@ def calculate_accuracy_svm():
         return accuracy_score(y_true, y_pred)
     except Exception as e:
         st.error(f"Error calculating SVM accuracy: {e}")
-        return None
-
-def calculate_accuracy_cnn():
-    try:
-        # Dummy data for accuracy calculation (replace with actual predictions and true labels)
-        y_true = np.array([0, 1, 1, 0, 0, 1])
-        y_pred = np.array([0, 1, 1, 0, 1, 1])
-        return accuracy_score(y_true, y_pred)
-    except Exception as e:
-        st.error(f"Error calculating CNN accuracy: {e}")
         return None
 
 def generate_confusion_matrix(y_true, y_pred, labels):
@@ -269,7 +196,7 @@ def generate_classification_report(y_true, y_pred, labels):
 # -------- Pages --------
 def page1():
     st.header("1. Model Selection")
-    st.session_state.model_choice = st.selectbox("Select Analysis Model", ["SVM", "CNN"])
+    st.session_state.model_choice = st.selectbox("Select Analysis Model", ["SVM"]) # Removed CNN
     if st.button("Next ➡️"):
         st.session_state.page = 2
 
@@ -334,40 +261,6 @@ def page2():
                                 st.session_state.page = 3
                             else:
                                 st.error("Error during image preprocessing for SVM.")
-                        elif st.session_state.model_choice == "CNN":
-                            aligned_after_resized_pil = Image.fromarray(np.array(aligned_after).astype(np.uint8))
-                            processed_img_cnn = preprocess_img(aligned_after_resized_pil, size=(28, 28)) # Resize for DummyCNN
-                            if processed_img_cnn is not None:
-                                img_tensor = transforms.ToTensor()(processed_img_cnn).unsqueeze(0)
-                                try:
-                                    with torch.no_grad():
-                                        output = cnn_model(img_tensor)
-                                        probabilities = torch.softmax(output, dim=1).numpy()[0]
-                                        classes = ["Vegetation", "Barren", "Water"]
-                                        st.session_state.classification_cnn = {classes[i]: prob * 100 for i, prob in enumerate(probabilities)}
-                                        st.session_state.classification = st.session_state.classification_cnn
-                                        st.session_state.cnn_roc_fig = generate_roc_curve_cnn()
-                                        st.session_state.cnn_accuracy = calculate_accuracy_cnn()
-                                        # Dummy data for confusion matrix and classification report
-                                        y_true_cnn = np.array([0, 1, 0, 2, 1, 2])
-                                        y_pred_cnn = np.array([0, 1, 1, 2, 0, 2])
-                                        labels_cnn = ["Vegetation", "Barren", "Water"]
-                                        st.session_state.cnn_conf_matrix = generate_confusion_matrix(y_true_cnn, y_pred_cnn, labels_cnn)
-                                        st.session_state.cnn_class_report = generate_classification_report(y_true_cnn, y_pred_cnn, labels_cnn)
-
-                                        h, w = st.session_state.change_mask.shape
-                                        heatmap_cnn = np.zeros((h, w, 3), dtype=np.uint8)
-                                        heatmap_cnn[..., 1] = st.session_state.change_mask * 255
-                                        heatmap_img_cnn = Image.fromarray(heatmap_cnn)
-                                        aligned_after_resized_full = st.session_state.aligned_images["after"].resize((w, h))
-                                        st.session_state.heatmap_overlay_cnn = Image.blend(aligned_after_resized_full.convert("RGB"),
-                                                                                                heatmap_img_cnn.convert("RGB"),
-                                                                                                alpha=0.5)
-                                        st.session_state.page = 3
-                                except Exception as e:
-                                    st.error(f"CNN classification error: {e}")
-                            else:
-                                st.error("Error during image preprocessing for CNN.")
                     else:
                         st.error("Could not create change mask.")
                 else:
@@ -415,11 +308,9 @@ def page4():
 
     if st.session_state.model_choice == "SVM" and st.session_state.heatmap_overlay_svm is not None:
         st.image(st.session_state.heatmap_overlay_svm, caption="Change Heatmap (Blue)", use_column_width=True)
-    elif st.session_state.model_choice == "CNN" and st.session_state.heatmap_overlay_cnn is not None:
-        st.image(st.session_state.heatmap_overlay_cnn, caption="Change Heatmap (Green)", use_column_width=True)
     else:
         # Default red heatmap if something goes wrong or initially
-        heatmap = np.zeros((h, w, 3), dtype=np.uint8)
+        heatmap = np.zeros((h, w, 3),dtype=np.uint8)
         heatmap[..., 2] = st.session_state.change_mask * 255  # Red channel
         heatmap_img = Image.fromarray(heatmap)
         st.session_state.heatmap_overlay_default = Image.blend(aligned_after_resized.convert("RGB"),
@@ -474,7 +365,7 @@ def page5():
     if st.session_state.model_choice == "SVM":
         classification_before = st.session_state.classification_before_svm
     else:
-        classification_before = st.session_state.classification_before_cnn
+        classification_before = {} # CNN is removed
 
     with col_before:
         st.subheader("Before Image")
@@ -552,36 +443,8 @@ def page6():
         else:
             st.warning("Classification report not available for SVM.")
 
-    elif st.session_state.model_choice == "CNN":
-        st.subheader("CNN Model Evaluation")
-        if st.session_state.cnn_roc_fig:
-            st.pyplot(st.session_state.cnn_roc_fig)
-        else:
-            st.warning("ROC curve data not available for CNN.")
-
-        if st.session_state.cnn_accuracy is not None:
-            st.metric("Accuracy", f"{st.session_state.cnn_accuracy:.2f}")
-        else:
-            st.warning("Accuracy data not available for CNN.")
-
-        st.subheader("CNN Confusion Matrix")
-        if st.session_state.cnn_conf_matrix:
-            st.pyplot(st.session_state.cnn_conf_matrix)
-        else:
-            st.warning("Confusion matrix not available for CNN.")
-
-        st.subheader("CNN Classification Report")
-        if st.session_state.cnn_class_report is not None:
-            st.dataframe(st.session_state.cnn_class_report)
-        else:
-            st.warning("Classification report not available for CNN.")
-
     st.subheader("Comparison")
-    st.markdown("Further correlation analysis between the models would typically involve analyzing their individual prediction patterns, error distributions, and potentially ensembling their results. Due to the use of dummy data in this simplified example, a meaningful correlation or direct comparison of their confusion patterns isn't feasible. In a real-world scenario with trained models and actual data, you would:")
-    st.markdown("- **Analyze the overlap and differences in their error patterns** by comparing the confusion matrices.")
-    st.markdown("- **Calculate correlation coefficients** between their prediction probabilities (if available).")
-    st.markdown("- **Evaluate if one model consistently outperforms the other** on specific classes.")
-    st.markdown("- **Consider ensembling techniques** if the models show complementary strengths.")
+    st.markdown("Since the CNN model has been removed, this section focuses solely on the evaluation of the SVM model.")
 
     if st.button("⬅️ Back"):
         st.session_state.page = 5
