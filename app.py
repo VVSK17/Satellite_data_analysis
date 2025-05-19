@@ -336,25 +336,38 @@ def page2():
                                 st.error("Error during image preprocessing for SVM.")
                         elif st.session_state.model_choice == "CNN":
                             aligned_after_resized_pil = Image.fromarray(np.array(aligned_after).astype(np.uint8))
-                            st.session_state.classification_cnn = classify_land_cnn(aligned_after_resized_pil)
-                            h, w = st.session_state.change_mask.shape
-                            heatmap_cnn = np.zeros((h, w, 3), dtype=np.uint8)
-                            heatmap_cnn[..., 1] = st.session_state.change_mask * 255
-                            heatmap_img_cnn = Image.fromarray(heatmap_cnn)
-                            aligned_after_resized = st.session_state.aligned_images["after"].resize((w, h))
-                            st.session_state.heatmap_overlay_cnn = Image.blend(aligned_after_resized.convert("RGB"),
-                                                                                    heatmap_img_cnn.convert("RGB"),
-                                                                                    alpha=0.5)
-                            st.session_state.classification = st.session_state.classification_cnn
-                            st.session_state.cnn_roc_fig = generate_roc_curve_cnn()
-                            st.session_state.cnn_accuracy = calculate_accuracy_cnn()
-                            # Dummy data for confusion matrix and classification report
-                            y_true_cnn = np.array([0, 1, 0, 2, 1, 2])
-                            y_pred_cnn = np.array([0, 1, 1, 2, 0, 2])
-                            labels_cnn = ["Vegetation", "Barren", "Water"]
-                            st.session_state.cnn_conf_matrix = generate_confusion_matrix(y_true_cnn, y_pred_cnn, labels_cnn)
-                            st.session_state.cnn_class_report = generate_classification_report(y_true_cnn, y_pred_cnn, labels_cnn)
-                            st.session_state.page = 3
+                            processed_img_cnn = preprocess_img(aligned_after_resized_pil, size=(28, 28)) # Resize for DummyCNN
+                            if processed_img_cnn is not None:
+                                img_tensor = transforms.ToTensor()(processed_img_cnn).unsqueeze(0)
+                                try:
+                                    with torch.no_grad():
+                                        output = cnn_model(img_tensor)
+                                        probabilities = torch.softmax(output, dim=1).numpy()[0]
+                                        classes = ["Vegetation", "Barren", "Water"]
+                                        st.session_state.classification_cnn = {classes[i]: prob * 100 for i, prob in enumerate(probabilities)}
+                                        st.session_state.classification = st.session_state.classification_cnn
+                                        st.session_state.cnn_roc_fig = generate_roc_curve_cnn()
+                                        st.session_state.cnn_accuracy = calculate_accuracy_cnn()
+                                        # Dummy data for confusion matrix and classification report
+                                        y_true_cnn = np.array([0, 1, 0, 2, 1, 2])
+                                        y_pred_cnn = np.array([0, 1, 1, 2, 0, 2])
+                                        labels_cnn = ["Vegetation", "Barren", "Water"]
+                                        st.session_state.cnn_conf_matrix = generate_confusion_matrix(y_true_cnn, y_pred_cnn, labels_cnn)
+                                        st.session_state.cnn_class_report = generate_classification_report(y_true_cnn, y_pred_cnn, labels_cnn)
+
+                                        h, w = st.session_state.change_mask.shape
+                                        heatmap_cnn = np.zeros((h, w, 3), dtype=np.uint8)
+                                        heatmap_cnn[..., 1] = st.session_state.change_mask * 255
+                                        heatmap_img_cnn = Image.fromarray(heatmap_cnn)
+                                        aligned_after_resized_full = st.session_state.aligned_images["after"].resize((w, h))
+                                        st.session_state.heatmap_overlay_cnn = Image.blend(aligned_after_resized_full.convert("RGB"),
+                                                                                                heatmap_img_cnn.convert("RGB"),
+                                                                                                alpha=0.5)
+                                        st.session_state.page = 3
+                                except Exception as e:
+                                    st.error(f"CNN classification error: {e}")
+                            else:
+                                st.error("Error during image preprocessing for CNN.")
                     else:
                         st.error("Could not create change mask.")
                 else:
