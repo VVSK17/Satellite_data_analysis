@@ -8,9 +8,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import io
 from sklearn import svm
-from sklearn.metrics import roc_curve, auc, accuracy_score
+from sklearn.metrics import roc_curve, auc, accuracy_score, confusion_matrix, classification_report
 from torchvision import transforms
 from datetime import datetime
+import seaborn as sns
 
 # Initialize session state for page navigation and data storage
 if 'page' not in st.session_state:
@@ -46,9 +47,17 @@ if 'svm_accuracy' not in st.session_state:
 if 'cnn_accuracy' not in st.session_state:
     st.session_state.cnn_accuracy = None
 if 'classification_before_svm' not in st.session_state:
-    st.session_state.classification_before_svm = {"Vegetation": 50, "Land": 30, "Water": 20}
+    st.session_state.classification_before_svm = {"Vegetation": 50, "Barren": 30, "Water": 20}
 if 'classification_before_cnn' not in st.session_state:
-    st.session_state.classification_before_cnn = {"Vegetation": 55, "Land": 25, "Developed": 20}
+    st.session_state.classification_before_cnn = {"Vegetation": 55, "Barren": 25, "Water": 20}
+if 'svm_conf_matrix' not in st.session_state:
+    st.session_state.svm_conf_matrix = None
+if 'cnn_conf_matrix' not in st.session_state:
+    st.session_state.cnn_conf_matrix = None
+if 'svm_class_report' not in st.session_state:
+    st.session_state.svm_class_report = None
+if 'cnn_class_report' not in st.session_state:
+    st.session_state.cnn_class_report = None
 
 
 # Set the page layout and browser tab title
@@ -141,7 +150,7 @@ def classify_land_svm(img_arr):
 
     # Make a prediction
     probabilities = svm_model.predict_proba(features.reshape(1, -1))[0]
-    classes = ["Vegetation", "Land", "Water"]
+    classes = ["Vegetation", "Barren", "Water"]
     return {classes[i]: prob * 100 for i, prob in enumerate(probabilities)}
 
 def classify_land_cnn(img):
@@ -153,7 +162,7 @@ def classify_land_cnn(img):
     with torch.no_grad():
         output = cnn_model(img_tensor)
         probabilities = torch.softmax(output, dim=1).numpy()[0]
-        classes = ["Vegetation", "Land", "Developed"]
+        classes = ["Vegetation", "Barren", "Water"]
         return {classes[i]: prob * 100 for i, prob in enumerate(probabilities)}
 
 def detect_calamity(date1, date2, change_percentage):
@@ -166,9 +175,9 @@ def detect_calamity(date1, date2, change_percentage):
         elif date_diff <= 30:
             return "🔥 **Possible Deforestation:** Significant loss of vegetation over a short term could suggest deforestation or wildfires."
         else:
-            return "🏗️ **Possible Urbanization:** Gradual yet significant increase in developed areas over time might indicate urbanization."
+            return "🏗️ **Possible Land Cover Change:** Significant changes observed over a longer period."
     elif change_percentage > 0.05:
-        return "🌱 **Seasonal Changes Detected:** Minor changes likely due to natural seasonal variations in vegetation or water bodies."
+        return "🌱 **Seasonal/Minor Changes Detected:** Minor changes likely due to natural variations."
     return "✅ **No Significant Calamity Detected:** Minimal changes observed between the two images."
 
 def get_csv_bytes(data_dict):
@@ -224,6 +233,20 @@ def calculate_accuracy_cnn():
     y_true = np.array([0, 1, 1, 0, 0, 1])
     y_pred = np.array([0, 1, 1, 0, 1, 1])
     return accuracy_score(y_true, y_pred)
+
+def generate_confusion_matrix(y_true, y_pred, labels):
+    cm = confusion_matrix(y_true, y_pred)
+    fig, ax = plt.subplots()
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=labels, yticklabels=labels)
+    ax.set_xlabel('Predicted Label')
+    ax.set_ylabel('True Label')
+    ax.set_title('Confusion Matrix')
+    return fig
+
+def generate_classification_report(y_true, y_pred, labels):
+    report = classification_report(y_true, y_pred, target_names=labels, output_dict=True)
+    df = pd.DataFrame(report).transpose()
+    return df
 
 # -------- Pages --------
 def page1():
@@ -287,9 +310,16 @@ def page2():
                     st.session_state.heatmap_overlay_svm = Image.blend(aligned_after_resized.convert("RGB"),
                                                                         heatmap_img_svm.convert("RGB"),
                                                                         alpha=0.5)
-                    st.session_state.classification = st.session_state.classification_svm
+                    st.session_state.classification = st.session_state.
+                    classification_svm
                     st.session_state.svm_roc_fig = generate_roc_curve_svm()
                     st.session_state.svm_accuracy = calculate_accuracy_svm()
+                    # Dummy data for confusion matrix and classification report
+                    y_true_svm = np.array([0, 0, 1, 1, 2, 2])
+                    y_pred_svm = np.array([0, 1, 1, 0, 2, 2])
+                    labels_svm = ["Vegetation", "Barren", "Water"]
+                    st.session_state.svm_conf_matrix = generate_confusion_matrix(y_true_svm, y_pred_svm, labels_svm)
+                    st.session_state.svm_class_report = generate_classification_report(y_true_svm, y_pred_svm, labels_svm)
 
                 elif st.session_state.model_choice == "CNN":
                     st.session_state.classification_cnn = classify_land_cnn(aligned_after)
@@ -305,9 +335,15 @@ def page2():
                     st.session_state.classification = st.session_state.classification_cnn
                     st.session_state.cnn_roc_fig = generate_roc_curve_cnn()
                     st.session_state.cnn_accuracy = calculate_accuracy_cnn()
+                    # Dummy data for confusion matrix and classification report
+                    y_true_cnn = np.array([0, 1, 0, 2, 1, 2])
+                    y_pred_cnn = np.array([0, 1, 1, 2, 0, 2])
+                    labels_cnn = ["Vegetation", "Barren", "Water"]
+                    st.session_state.cnn_conf_matrix = generate_confusion_matrix(y_true_cnn, y_pred_cnn, labels_cnn)
+                    st.session_state.cnn_class_report = generate_classification_report(y_true_cnn, y_pred_cnn, labels_cnn)
                     st.session_state.page = 3
-            except Exception as e:
-                st.error(f"Error processing images: {e}")
+                except Exception as e:
+                    st.error(f"Error processing images: {e}")
 def page3():
     st.header("3. Aligned Images Comparison")
 
@@ -395,14 +431,14 @@ def page5():
 
 
     # Classification Table
-    st.subheader(f"Land Classification using {st.session_state.model_choice}")
+    st.subheader(f"Land Cover Classification using {st.session_state.model_choice}")
     df_class = pd.DataFrame(list(st.session_state.classification.items()),
-                            columns=["Class", "Area (%)"])
+                            columns=["Land Cover", "Area (%)"])
     st.table(df_class)
 
-    # Pie Chart
-    st.subheader("Land Distribution Comparison")
-    fig, ax = plt.subplots(1, 2, figsize=(12, 6))
+    # Pie Charts
+    st.subheader("Land Cover Distribution Comparison")
+    col_before, col_after = st.columns(2)
 
     # Data for before image classification
     if st.session_state.model_choice == "SVM":
@@ -410,19 +446,49 @@ def page5():
     else:
         classification_before = st.session_state.classification_before_cnn
 
-    labels_before = classification_before.keys()
-    sizes_before = classification_before.values()
-    ax[0].pie(sizes_before, labels=labels_before, autopct='%1.1f%%', shadow=True, startangle=140)
-    ax[0].axis('equal')
-    ax[0].set_title('Before Image Classification')
+    with col_before:
+        st.subheader("Before Image")
+        fig_before, ax_before = plt.subplots()
+        labels_before = classification_before.keys()
+        sizes_before = classification_before.values()
+        ax_before.pie(sizes_before, labels=labels_before, autopct='%1.1f%%', shadow=True, startangle=140)
+        ax_before.axis('equal')
+        st.pyplot(fig_before)
 
-    labels_after = st.session_state.classification.keys()
-    sizes_after = st.session_state.classification.values()
-    ax[1].pie(sizes_after, labels=labels_after, autopct='%1.1f%%', shadow=True, startangle=140)
-    ax[1].axis('equal')
-    ax[1].set_title('After Image Classification')
+    with col_after:
+        st.subheader("After Image")
+        fig_after, ax_after = plt.subplots()
+        labels_after = st.session_state.classification.keys()
+        sizes_after = st.session_state.classification.values()
+        ax_after.pie(sizes_after, labels=labels_after, autopct='%1.1f%%', shadow=True, startangle=140)
+        ax_after.axis('equal')
+        st.pyplot(fig_after)
 
-    st.pyplot(fig)
+    # Separate Pie Charts for Vegetation and Barren
+    st.subheader("Vegetation and Barren Comparison")
+    col_veg, col_barren = st.columns(2)
+
+    with col_veg:
+        st.subheader("Vegetation Change")
+        veg_before = classification_before.get("Vegetation", 0)
+        veg_after = st.session_state.classification.get("Vegetation", 0)
+        labels_veg = ["Before", "After"]
+        sizes_veg = [veg_before, veg_after]
+        fig_veg, ax_veg = plt.subplots()
+        ax_veg.pie(sizes_veg, labels=labels_veg, autopct='%1.1f%%', shadow=True, startangle=140)
+        ax_veg.axis('equal')
+        st.pyplot(fig_veg)
+
+    with col_barren:
+        st.subheader("Barren Area Change")
+        barren_before = classification_before.get("Barren", 0)
+        barren_after = st.session_state.classification.get("Barren", 0)
+        labels_barren = ["Before", "After"]
+        sizes_barren = [barren_before, barren_after]
+        fig_barren, ax_barren = plt.subplots()
+        ax_barren.pie(sizes_barren, labels=labels_barren, autopct='%1.1f%%', shadow=True, startangle=140)
+        ax_barren.axis('equal')
+        st.pyplot(fig_barren)
 
     if st.button("⬅️ Back"):
         st.session_state.page = 4
@@ -444,6 +510,18 @@ def page6():
         else:
             st.warning("Accuracy data not available for SVM.")
 
+        st.subheader("SVM Confusion Matrix")
+        if st.session_state.svm_conf_matrix:
+            st.pyplot(st.session_state.svm_conf_matrix)
+        else:
+            st.warning("Confusion matrix not available for SVM.")
+
+        st.subheader("SVM Classification Report")
+        if st.session_state.svm_class_report is not None:
+            st.dataframe(st.session_state.svm_class_report)
+        else:
+            st.warning("Classification report not available for SVM.")
+
     elif st.session_state.model_choice == "CNN":
         st.subheader("CNN Model Evaluation")
         if st.session_state.cnn_roc_fig:
@@ -455,6 +533,25 @@ def page6():
             st.metric("Accuracy", f"{st.session_state.cnn_accuracy:.2f}")
         else:
             st.warning("Accuracy data not available for CNN.")
+
+        st.subheader("CNN Confusion Matrix")
+        if st.session_state.cnn_conf_matrix:
+            st.pyplot(st.session_state.cnn_conf_matrix)
+        else:
+            st.warning("Confusion matrix not available for CNN.")
+
+        st.subheader("CNN Classification Report")
+        if st.session_state.cnn_class_report is not None:
+            st.dataframe(st.session_state.cnn_class_report)
+        else:
+            st.warning("Classification report not available for CNN.")
+
+    st.subheader("Comparison")
+    st.markdown("Further correlation analysis between the models would typically involve analyzing their individual prediction patterns, error distributions, and potentially ensembling their results. Due to the use of dummy data in this simplified example, a meaningful correlation or direct comparison of their confusion patterns isn't feasible. In a real-world scenario with trained models and actual data, you would:")
+    st.markdown("- **Analyze the overlap and differences in their error patterns** by comparing the confusion matrices.")
+    st.markdown("- **Calculate correlation coefficients** between their prediction probabilities (if available).")
+    st.markdown("- **Evaluate if one model consistently outperforms the other** on specific classes.")
+    st.markdown("- **Consider ensembling techniques** if the models show complementary strengths.")
 
     if st.button("⬅️ Back"):
         st.session_state.page = 5
