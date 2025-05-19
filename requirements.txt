@@ -10,3 +10,4 @@ datetime
 seaborn
 torch
 torchvision
+pytorch
