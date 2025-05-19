@@ -341,7 +341,7 @@ def page2():
                     st.session_state.cnn_conf_matrix = generate_confusion_matrix(y_true_cnn, y_pred_cnn, labels_cnn)
                     st.session_state.cnn_class_report = generate_classification_report(y_true_cnn, y_pred_cnn, labels_cnn)
                     st.session_state.page = 3
-                except Exception as e:
+            except Exception as e:
                     st.error(f"Error processing images: {e}")
 def page3():
     st.header("3. Aligned Images Comparison")
