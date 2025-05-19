@@ -1,8 +1,6 @@
 streamlit
 numpy
 opencv-python-headless
-torch
-torchvision
 Pillow
 matplotlib
 pandas
