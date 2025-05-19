@@ -304,7 +304,7 @@ def page4():
     st.subheader(f"Heatmap using {st.session_state.model_choice} Model")
 
     h, w = st.session_state.change_mask.shape
-    aligned_after_resized = st.session_state.aligned_images["after"].resize(w, h))
+    aligned_after_resized = st.session_state.aligned_images["after"].resize(w, h)
 
     if st.session_state.model_choice == "SVM" and st.session_state.heatmap_overlay_svm is not None:
         st.image(st.session_state.heatmap_overlay_svm, caption="Change Heatmap (Blue)", use_column_width=True)
